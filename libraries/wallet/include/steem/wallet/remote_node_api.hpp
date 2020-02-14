@@ -47,7 +47,6 @@ struct remote_node_api
    optional< database_api::api_account_recovery_request_object > get_recovery_request( account_name_type );
    optional< condenser_api::api_escrow_object > get_escrow( account_name_type, uint32_t );
    vector< database_api::api_withdraw_vesting_route_object > get_withdraw_routes( account_name_type, condenser_api::withdraw_route_type );
-   optional< witness::api_account_bandwidth_object > get_account_bandwidth( account_name_type, witness::bandwidth_type );
    vector< condenser_api::api_savings_withdraw_object > get_savings_withdraw_from( account_name_type );
    vector< condenser_api::api_savings_withdraw_object > get_savings_withdraw_to( account_name_type );
    vector< condenser_api::api_vesting_delegation_object > get_vesting_delegations( account_name_type, account_name_type, uint32_t );
@@ -107,6 +106,11 @@ struct remote_node_api
    vector< condenser_api::market_trade > get_recent_trades( uint32_t );
    vector< market_history::bucket_object > get_market_history( uint32_t, time_point_sec, time_point_sec );
    flat_set< uint32_t > get_market_history_buckets();
+   vector< condenser_api::api_proposal_object > list_proposals( fc::variant, uint32_t, database_api::sort_order_type, database_api::order_direction_type, database_api::proposal_status );
+   vector< condenser_api::api_proposal_object > find_proposals( vector< int64_t > );
+   vector< database_api::api_proposal_vote_object > list_proposal_votes( fc::variant, uint32_t, database_api::sort_order_type, database_api::order_direction_type, database_api::proposal_status );
+   vector< asset_symbol_type > get_nai_pool(void);
+   vector< database_api::api_smt_account_balance_object > get_smt_balances( vector< std::pair < string, string > > );
 };
 
 } }
@@ -138,7 +142,6 @@ FC_API( steem::wallet::remote_node_api,
         (get_recovery_request)
         (get_escrow)
         (get_withdraw_routes)
-        (get_account_bandwidth)
         (get_savings_withdraw_from)
         (get_savings_withdraw_to)
         (get_vesting_delegations)
@@ -198,4 +201,9 @@ FC_API( steem::wallet::remote_node_api,
         (get_recent_trades)
         (get_market_history)
         (get_market_history_buckets)
+        (list_proposals)
+        (find_proposals)
+        (list_proposal_votes)
+        (get_nai_pool)
+        (get_smt_balances)
       )

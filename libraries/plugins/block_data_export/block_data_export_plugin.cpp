@@ -1,16 +1,16 @@
 
 #define BOOST_THREAD_PROVIDES_EXECUTORS
 #define BOOST_THREAD_PROVIDES_FUTURE
+#define BOOST_THREAD_PROVIDES_FUTURE_CONTINUATION
+#define BOOST_THREAD_USES_MOVE
 
 #include <steem/plugins/block_data_export/block_data_export_plugin.hpp>
 #include <steem/plugins/block_data_export/exportable_block_data.hpp>
 
 #include <steem/chain/account_object.hpp>
-#include <steem/chain/block_notification.hpp>
 #include <steem/chain/database.hpp>
 #include <steem/chain/global_property_object.hpp>
 #include <steem/chain/index.hpp>
-#include <steem/chain/operation_notification.hpp>
 
 #include <boost/thread/future.hpp>
 #include <boost/thread/sync_bounded_queue.hpp>

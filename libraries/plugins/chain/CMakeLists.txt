@@ -1,6 +1,9 @@
-file(GLOB HEADERS "include/steem/chain_plugin/*.hpp")
+file(GLOB HEADERS "include/steem/plugins/chain/*.hpp")
 add_library( chain_plugin
              chain_plugin.cpp
+             statefile/load_state.cpp
+             statefile/save_state.cpp
+             statefile/statefile.cpp
              ${HEADERS} )
 
 target_link_libraries( chain_plugin steem_chain appbase steem_utilities statsd_plugin )
@@ -20,4 +23,4 @@ install( TARGETS
    LIBRARY DESTINATION lib
    ARCHIVE DESTINATION lib
 )
-install( FILES ${HEADERS} DESTINATION "include/steem/chain_plugin" )
+install( FILES ${HEADERS} DESTINATION "include/steem/plugins/chain" )

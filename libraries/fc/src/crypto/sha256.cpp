@@ -12,13 +12,15 @@
 namespace fc {
 
     sha256::sha256() { memset( _hash, 0, sizeof(_hash) ); }
-    sha256::sha256( const char *data, size_t size ) { 
-       if (size != sizeof(_hash))	 
+    sha256::sha256( const char *data, size_t size ) {
+       if (size != sizeof(_hash))
 	  FC_THROW_EXCEPTION( exception, "sha256: size mismatch" );
        memcpy(_hash, data, size );
     }
     sha256::sha256( const string& hex_str ) {
-      fc::from_hex( hex_str, (char*)_hash, sizeof(_hash) );  
+      //hex string can be less than 256 bits in which case the end of the string could be garbage
+      memset( _hash, 0, sizeof(_hash) );
+      fc::from_hex( hex_str, (char*)_hash, sizeof(_hash) );
     }
 
     string sha256::str()const {
@@ -54,7 +56,7 @@ namespace fc {
     }
 
     void sha256::encoder::write( const char* d, uint32_t dlen ) {
-      SHA256_Update( &my->ctx, d, dlen); 
+      SHA256_Update( &my->ctx, d, dlen);
     }
     sha256 sha256::encoder::result() {
       sha256 h;
@@ -62,7 +64,7 @@ namespace fc {
       return h;
     }
     void sha256::encoder::reset() {
-      SHA256_Init( &my->ctx);  
+      SHA256_Init( &my->ctx);
     }
 
     sha256 operator << ( const sha256& h1, uint32_t i ) {
@@ -206,7 +208,7 @@ namespace fc {
         memcpy(&bi, ve.data(), fc::min<size_t>(ve.size(),sizeof(bi)) );
     }
     else
-        memset( &bi, char(0), sizeof(bi) );
+        memset( static_cast<void*>(&bi), char(0), sizeof(bi) );
   }
 
   uint64_t hash64(const char* buf, size_t len)

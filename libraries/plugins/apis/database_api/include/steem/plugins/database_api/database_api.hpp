@@ -29,6 +29,11 @@ class database_api
          (get_config)
 
          /**
+          * @brief Return version information and chain_id of running node
+          */
+         (get_version)
+
+         /**
          * @brief Retrieve the current @ref dynamic_global_property_object
          */
          (get_dynamic_global_properties)
@@ -96,6 +101,14 @@ class database_api
          (find_limit_orders)
          (get_order_book)
 
+         /////////
+         // SPS //
+         /////////
+
+         (list_proposals)
+         (find_proposals)
+         (list_proposal_votes)
+
          ////////////////////////////
          // Authority / validation //
          ////////////////////////////
@@ -132,12 +145,22 @@ class database_api
           */
          (verify_signatures)
 
-#ifdef STEEM_ENABLE_SMT
          /**
          * @return array of Numeric Asset Identifier (NAI) available to be used for new SMT to be created.
          */
-         (get_smt_next_identifier)
-#endif
+         (get_nai_pool)
+
+         (list_smt_contributions)
+         (find_smt_contributions)
+
+         (list_smt_tokens)
+         (find_smt_tokens)
+
+         (list_smt_token_emissions)
+         (find_smt_token_emissions)
+
+         (list_smt_token_balances)
+         (find_smt_token_balances)
       )
 
    private:

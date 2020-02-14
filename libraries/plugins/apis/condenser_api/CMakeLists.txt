@@ -1,4 +1,4 @@
-file(GLOB HEADERS "include/steem/condenser_api_plugin/*.hpp")
+file(GLOB HEADERS "include/steem/plugins/condenser_api/*.hpp")
 add_library( condenser_api_plugin
              condenser_api.cpp
              condenser_api_plugin.cpp
@@ -13,10 +13,10 @@ target_link_libraries( condenser_api_plugin
    database_api_plugin
    block_api_plugin
    follow_api_plugin
+   reputation_api_plugin
    market_history_api_plugin
    network_broadcast_api_plugin
    tags_api_plugin
-   witness_api_plugin
    steem_utilities )
 target_include_directories( condenser_api_plugin PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" )
 

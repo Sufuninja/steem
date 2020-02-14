@@ -1,10 +1,15 @@
+
+#include <steem/chain/steem_fwd.hpp>
+
 #include <steem/plugins/market_history/market_history_plugin.hpp>
 
 #include <steem/chain/database.hpp>
 #include <steem/chain/index.hpp>
-#include <steem/chain/operation_notification.hpp>
 
 #include <fc/io/json.hpp>
+
+#define MH_BUCKET_SIZE "market-history-bucket-size"
+#define MH_TRACK_TIME "market-history-track-time"
 
 namespace steem { namespace plugins { namespace market_history {
 
@@ -26,8 +31,8 @@ class market_history_plugin_impl
       void on_post_apply_operation( const operation_notification& note );
 
       chain::database&     _db;
-      flat_set<uint32_t>            _tracked_buckets = flat_set<uint32_t>  { 15, 60, 300, 3600, 86400 };
-      int32_t                       _maximum_history_per_bucket_size = 1000;
+      vector<uint32_t>              _tracked_buckets = vector<uint32_t>  { 15, 60, 300, 3600, 21600 };
+      int32_t                       _maximum_history_track_time = 604800;
       boost::signals2::connection   _post_apply_operation_conn;
 };
 
@@ -37,7 +42,10 @@ void market_history_plugin_impl::on_post_apply_operation( const operation_notifi
    {
       fill_order_operation op = o.op.get< fill_order_operation >();
 
-      const auto& bucket_idx = _db.get_index< bucket_index >().indices().get< by_bucket >();
+      asset_symbol_type market_symbol = op.current_pays.symbol == STEEM_SYMBOL ?
+         op.open_pays.symbol : op.current_pays.symbol;
+
+      const auto& bucket_idx = _db.get_index< bucket_index, by_bucket >();
 
       _db.create< order_history_object >( [&]( order_history_object& ho )
       {
@@ -45,17 +53,17 @@ void market_history_plugin_impl::on_post_apply_operation( const operation_notifi
          ho.op = op;
       });
 
-      if( !_maximum_history_per_bucket_size ) return;
+      if( !_maximum_history_track_time ) return;
       if( !_tracked_buckets.size() ) return;
 
       for( const auto& bucket : _tracked_buckets )
       {
-         auto cutoff = _db.head_block_time() - fc::seconds( bucket * _maximum_history_per_bucket_size );
+         auto cutoff = _db.head_block_time() - fc::seconds( _maximum_history_track_time );
 
          auto open = fc::time_point_sec( ( _db.head_block_time().sec_since_epoch() / bucket ) * bucket );
          auto seconds = bucket;
 
-         auto itr = bucket_idx.find( boost::make_tuple( seconds, open ) );
+         auto itr = bucket_idx.find( boost::make_tuple( market_symbol, seconds, open ) );
          if( itr == bucket_idx.end() )
          {
             _db.create< bucket_object >( [&]( bucket_object& b )
@@ -64,9 +72,7 @@ void market_history_plugin_impl::on_post_apply_operation( const operation_notifi
                b.seconds = bucket;
 
                b.steem.fill( ( op.open_pays.symbol == STEEM_SYMBOL ) ? op.open_pays.amount : op.current_pays.amount );
-#ifdef STEEM_ENABLE_SMT
                   b.symbol = ( op.open_pays.symbol == STEEM_SYMBOL ) ? op.current_pays.symbol : op.open_pays.symbol;
-#endif
                   b.non_steem.fill( ( op.open_pays.symbol == STEEM_SYMBOL ) ? op.current_pays.amount : op.open_pays.amount );
             });
          }
@@ -74,9 +80,8 @@ void market_history_plugin_impl::on_post_apply_operation( const operation_notifi
          {
             _db.modify( *itr, [&]( bucket_object& b )
             {
-#ifdef STEEM_ENABLE_SMT
                b.symbol = ( op.open_pays.symbol == STEEM_SYMBOL ) ? op.current_pays.symbol : op.open_pays.symbol;
-#endif
+
                if( op.open_pays.symbol == STEEM_SYMBOL )
                {
                   b.steem.volume += op.open_pays.amount;
@@ -123,10 +128,10 @@ void market_history_plugin_impl::on_post_apply_operation( const operation_notifi
                }
             });
 
-            if( _maximum_history_per_bucket_size > 0 )
+            if( _maximum_history_track_time > 0 )
             {
                open = fc::time_point_sec();
-               itr = bucket_idx.lower_bound( boost::make_tuple( seconds, open ) );
+               itr = bucket_idx.lower_bound( boost::make_tuple( market_symbol, seconds, open ) );
 
                while( itr->seconds == seconds && itr->open < cutoff )
                {
@@ -151,10 +156,10 @@ void market_history_plugin::set_program_options(
 )
 {
    cfg.add_options()
-         ("market-history-bucket-size", boost::program_options::value<string>()->default_value("[15,60,300,3600,86400]"),
+         (MH_BUCKET_SIZE, boost::program_options::value<string>()->default_value("[15,60,300,3600,21600]"),
            "Track market history by grouping orders into buckets of equal size measured in seconds specified as a JSON array of numbers")
-         ("market-history-buckets-per-size", boost::program_options::value<uint32_t>()->default_value(5760),
-           "How far back in time to track history for each bucket size, measured in the number of buckets (default: 5760)")
+         (MH_TRACK_TIME, boost::program_options::value<uint32_t>()->default_value(604800),
+           "How far back in time to track market history, measure in seconds (default: 604800)")
          ;
 }
 
@@ -166,19 +171,26 @@ void market_history_plugin::plugin_initialize( const boost::program_options::var
       my = std::make_unique< detail::market_history_plugin_impl >();
 
       my->_post_apply_operation_conn = my->_db.add_post_apply_operation_handler( [&]( const operation_notification& note ){ my->on_post_apply_operation( note ); }, *this, 0 );
-      add_plugin_index< bucket_index        >( my->_db );
-      add_plugin_index< order_history_index >( my->_db );
+      STEEM_ADD_PLUGIN_INDEX(my->_db, bucket_index);
+      STEEM_ADD_PLUGIN_INDEX(my->_db, order_history_index);
 
-      if( options.count("bucket-size" ) )
+      fc::mutable_variant_object state_opts;
+
+      if( options.count( MH_BUCKET_SIZE ) )
       {
-         std::string buckets = options["bucket-size"].as< string >();
-         my->_tracked_buckets = fc::json::from_string( buckets ).as< flat_set< uint32_t > >();
+         std::string buckets = options[MH_BUCKET_SIZE].as< string >();
+         my->_tracked_buckets = fc::json::from_string( buckets ).as< vector< uint32_t > >();
+         std::sort( my->_tracked_buckets.begin(), my->_tracked_buckets.end(), std::greater< uint32_t >() );
+         state_opts[MH_BUCKET_SIZE] = buckets;
       }
-      if( options.count("history-per-size" ) )
-         my->_maximum_history_per_bucket_size = options["history-per-size"].as< uint32_t >();
 
-      wlog( "bucket-size ${b}", ("b", my->_tracked_buckets) );
-      wlog( "history-per-size ${h}", ("h", my->_maximum_history_per_bucket_size) );
+      if( options.count( MH_TRACK_TIME ) )
+      {
+         my->_maximum_history_track_time = options[MH_TRACK_TIME].as< uint32_t >();
+         state_opts[MH_TRACK_TIME] = my->_maximum_history_track_time;
+      }
+
+      appbase::app().get_plugin< chain::chain_plugin >().report_state_options( name(), state_opts );
 
       ilog( "market_history: plugin_initialize() end" );
    } FC_CAPTURE_AND_RETHROW()
@@ -191,14 +203,14 @@ void market_history_plugin::plugin_shutdown()
    chain::util::disconnect_signal( my->_post_apply_operation_conn );
 }
 
-flat_set< uint32_t > market_history_plugin::get_tracked_buckets() const
+const vector< uint32_t >& market_history_plugin::get_tracked_buckets() const
 {
    return my->_tracked_buckets;
 }
 
-uint32_t market_history_plugin::get_max_history_per_bucket() const
+uint32_t market_history_plugin::get_max_history_track_time() const
 {
-   return my->_maximum_history_per_bucket_size;
+   return my->_maximum_history_track_time;
 }
 
 } } } // steem::plugins::market_history

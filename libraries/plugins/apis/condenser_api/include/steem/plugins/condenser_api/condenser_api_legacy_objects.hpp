@@ -1,4 +1,5 @@
 #pragma once
+#include <steem/chain/steem_fwd.hpp>
 #include <steem/plugins/condenser_api/condenser_api_legacy_operations.hpp>
 
 #include <steem/plugins/block_api/block_api_objects.hpp>
@@ -8,7 +9,9 @@ namespace steem { namespace plugins { namespace condenser_api {
 typedef static_variant<
          void_t,
          version,
-         hardfork_version_vote
+         hardfork_version_vote,
+         required_automated_actions,
+         optional_automated_actions
       > legacy_block_header_extensions;
 
 typedef vector< legacy_block_header_extensions > legacy_block_header_extensions_type;

@@ -2,13 +2,14 @@
 
 namespace steem { namespace protocol {
 
-// TODO:  Rename these curves to match naming in manual.md
 enum curve_id
 {
    quadratic,
-   quadratic_curation,
+   bounded,
    linear,
-   square_root
+   square_root,
+   convergent_linear,
+   convergent_square_root
 };
 
 } } // steem::utilities
@@ -17,7 +18,9 @@ enum curve_id
 FC_REFLECT_ENUM(
    steem::protocol::curve_id,
    (quadratic)
-   (quadratic_curation)
+   (bounded)
    (linear)
    (square_root)
+   (convergent_linear)
+   (convergent_square_root)
 )

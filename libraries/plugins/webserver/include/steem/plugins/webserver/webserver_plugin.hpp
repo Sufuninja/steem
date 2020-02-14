@@ -1,7 +1,9 @@
 #pragma once
+#include <steem/chain/steem_fwd.hpp>
 #include <appbase/application.hpp>
 
 #include <steem/plugins/json_rpc/json_rpc_plugin.hpp>
+#include <steem/plugins/chain/chain_plugin.hpp>
 
 #include <boost/thread.hpp>
 #include <boost/container/vector.hpp>
@@ -33,7 +35,7 @@ class webserver_plugin : public appbase::plugin< webserver_plugin >
       webserver_plugin();
       virtual ~webserver_plugin();
 
-      APPBASE_PLUGIN_REQUIRES( (plugins::json_rpc::json_rpc_plugin) );
+      APPBASE_PLUGIN_REQUIRES( (plugins::chain::chain_plugin)(plugins::json_rpc::json_rpc_plugin) );
 
       static const std::string& name() { static std::string name = STEEM_WEBSERVER_PLUGIN_NAME; return name; }
 

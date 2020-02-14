@@ -28,14 +28,17 @@ target_link_libraries( real128_test fc )
 add_executable( hmac_test hmac_test.cpp )
 target_link_libraries( hmac_test fc )
 
-add_executable( blinding_test blinding_test.cpp )
-target_link_libraries( blinding_test fc )
-
 add_executable( ecc_test crypto/ecc_test.cpp )
 target_link_libraries( ecc_test fc )
 
 add_executable( log_test crypto/log_test.cpp )
 target_link_libraries( log_test fc )
+
+add_executable( saturation_test saturation_test.cpp )
+target_link_libraries( saturation_test fc )
+
+add_executable( ecdsa_canon_test crypto/ecdsa_canon_test.cpp )
+target_link_libraries( ecdsa_canon_test fc )
 
 #add_executable( test_aes aes_test.cpp )
 #target_link_libraries( test_aes fc ${rt_library} ${pthread_library} )
@@ -54,7 +57,6 @@ add_executable( all_tests all_tests.cpp
                           crypto/bigint_test.cpp
                           crypto/blind.cpp
                           crypto/blowfish_test.cpp
-                          crypto/dh_test.cpp
                           crypto/rand_test.cpp
                           crypto/sha_tests.cpp
                           network/ntp_test.cpp
@@ -63,6 +65,7 @@ add_executable( all_tests all_tests.cpp
                           thread/thread_tests.cpp
                           bloom_test.cpp
                           real128_test.cpp
+                          saturation_test.cpp
                           utf8_test.cpp
                           )
 target_link_libraries( all_tests fc )

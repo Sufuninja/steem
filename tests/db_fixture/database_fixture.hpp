@@ -20,8 +20,9 @@
 #include <iostream>
 
 #define INITIAL_TEST_SUPPLY (10000000000ll)
+#define SBD_INITIAL_TEST_SUPPLY (300000000ll)
 
-extern uint32_t ( STEEM_TESTING_GENESIS_TIMESTAMP );
+extern uint32_t STEEM_TESTING_GENESIS_TIMESTAMP;
 
 #define PUSH_TX \
    steem::chain::test::_push_transaction
@@ -154,7 +155,7 @@ extern uint32_t ( STEEM_TESTING_GENESIS_TIMESTAMP );
 #define OP2TX(OP,TX,KEY) \
 TX.operations.push_back( OP ); \
 TX.set_expiration( db->head_block_time() + STEEM_MAX_TIME_UNTIL_EXPIRATION ); \
-TX.sign( KEY, db->get_chain_id() );
+TX.sign( KEY, db->get_chain_id(), fc::ecc::bip_0062 );
 
 #define PUSH_OP(OP,KEY) \
 { \
@@ -194,22 +195,21 @@ struct database_fixture {
    string debug_key = steem::utilities::key_to_wif( init_account_priv_key );
    public_key_type init_account_pub_key = init_account_priv_key.get_public_key();
    uint32_t default_skip = 0 | database::skip_undo_history_check | database::skip_authority_check;
+   fc::ecc::canonical_signature_type default_sig_canon = fc::ecc::fc_canonical;
 
    plugins::debug_node::debug_node_plugin* db_plugin;
 
    optional<fc::temp_directory> data_dir;
    bool skip_key_index_test = false;
-   uint32_t anon_acct_count;
 
    database_fixture() {}
    virtual ~database_fixture() { appbase::reset(); }
 
+   using units = flat_map< unit_target_type, uint16_t >;
+
    static fc::ecc::private_key generate_private_key( string seed = "init_key" );
-#ifdef STEEM_ENABLE_SMT
    static asset_symbol_type get_new_smt_symbol( uint8_t token_decimal_places, chain::database* db );
-#endif
-   string generate_anon_acct_name();
-   void open_database();
+   void open_database( uint16_t shared_file_size_in_mb = 8 );
    void generate_block(uint32_t skip = 0,
                                const fc::ecc::private_key& key = generate_private_key("init_key"),
                                int miss_blocks = 0);
@@ -247,7 +247,6 @@ struct database_fixture {
       const public_key_type& key
    );
 
-
    const witness_object& witness_create(
       const string& owner,
       const private_key_type& owner_key,
@@ -260,8 +259,9 @@ struct database_fixture {
    void fund( const string& account_name, const asset& amount );
    void transfer( const string& from, const string& to, const asset& amount );
    void convert( const string& account_name, const asset& amount );
+   void vest( const string& from, const string& to, const asset& amount );
    void vest( const string& from, const share_type& amount );
-   void vest( const string& account, const asset& amount );
+   void vest( const string& from, const asset& amount );
    void proxy( const string& account, const string& proxy );
    void set_price_feed( const price& new_price );
    void set_witness_props( const flat_map< string, vector< char > >& new_props );
@@ -270,40 +270,8 @@ struct database_fixture {
 
    vector< operation > get_last_operations( uint32_t ops );
 
-   void validate_database( void );
-};
-
-struct clean_database_fixture : public database_fixture
-{
-   clean_database_fixture();
-   virtual ~clean_database_fixture();
-
-   void resize_shared_mem( uint64_t size );
-};
-
-struct live_database_fixture : public database_fixture
-{
-   live_database_fixture();
-   virtual ~live_database_fixture();
-
-   fc::path _chain_dir;
-};
-
-#ifdef STEEM_ENABLE_SMT
-template< typename T >
-struct t_smt_database_fixture : public T
-{
-   using units = flat_map< account_name_type, uint16_t >;
-
-   using database_fixture::set_price_feed;
-   using database_fixture::fund;
-   using database_fixture::convert;
-
-   t_smt_database_fixture(){}
-   virtual ~t_smt_database_fixture(){}
-
-   asset_symbol_type create_smt( const string& account_name, const fc::ecc::private_key& key,
-      uint8_t token_decimal_places );
+   asset_symbol_type create_smt( const string& account_name, const fc::ecc::private_key& key, uint8_t token_decimal_places );
+   asset_symbol_type create_smt_with_nai( const string& account_name, const fc::ecc::private_key& key, uint32_t nai, uint8_t token_decimal_places );
 
    /// Creates 3 different SMTs for provided control account, one with 0 precision, the other two with the same non-zero precision.
    std::array<asset_symbol_type, 3> create_smt_3(const char* control_account_name, const fc::ecc::private_key& key);
@@ -314,23 +282,69 @@ struct t_smt_database_fixture : public T
 
    //smt_setup_operation
    smt_generation_unit get_generation_unit ( const units& steem_unit = units(), const units& token_unit = units() );
-   smt_cap_commitment get_cap_commitment( share_type amount = 0, uint128_t nonce = 0 );
    smt_capped_generation_policy get_capped_generation_policy
    (
       const smt_generation_unit& pre_soft_cap_unit = smt_generation_unit(),
       const smt_generation_unit& post_soft_cap_unit = smt_generation_unit(),
-      const smt_cap_commitment& min_steem_units_commitment = smt_cap_commitment(),
-      const smt_cap_commitment& hard_cap_steem_units_commitment = smt_cap_commitment(),
-      uint16_t soft_cap_percent = 0,
       uint32_t min_unit_ratio = 0,
       uint32_t max_unit_ratio = 0
    );
+
+   void validate_database();
 };
 
-using smt_database_fixture = t_smt_database_fixture< clean_database_fixture >;
-using smt_database_fixture_for_plugin = t_smt_database_fixture< database_fixture >;
+struct clean_database_fixture : public database_fixture
+{
+   clean_database_fixture( uint16_t shared_file_size_in_mb = 8 );
+   virtual ~clean_database_fixture();
 
-#endif
+   void resize_shared_mem( uint64_t size );
+   void validate_database();
+};
+
+struct live_database_fixture : public database_fixture
+{
+   live_database_fixture();
+   virtual ~live_database_fixture();
+
+   fc::path _chain_dir;
+};
+
+struct sps_proposal_database_fixture : public clean_database_fixture
+{
+   sps_proposal_database_fixture( uint16_t shared_file_size_in_mb = 8 )
+                           : clean_database_fixture( shared_file_size_in_mb ){}
+   virtual ~sps_proposal_database_fixture(){}
+
+   void plugin_prepare();
+
+   int64_t create_proposal(   std::string creator, std::string receiver,
+                              time_point_sec start_date, time_point_sec end_date,
+                              asset daily_pay, const fc::ecc::private_key& key );
+
+   void vote_proposal( std::string voter, const std::vector< int64_t >& id_proposals, bool approve, const fc::ecc::private_key& key );
+
+   bool exist_proposal( int64_t id );
+   const proposal_object* find_proposal( int64_t id );
+
+   void remove_proposal(account_name_type _deleter, flat_set<int64_t> _proposal_id, const fc::ecc::private_key& _key);
+
+   bool find_vote_for_proposal(const std::string& _user, int64_t _proposal_id);
+
+   uint64_t get_nr_blocks_until_maintenance_block();
+
+   void post_comment( std::string _authro, std::string _permlink, std::string _title, std::string _body, std::string _parent_permlink, const fc::ecc::private_key& _key);
+};
+
+struct sps_proposal_database_fixture_performance : public sps_proposal_database_fixture
+{
+   sps_proposal_database_fixture_performance( uint16_t shared_file_size_in_mb = 512 )
+                           : sps_proposal_database_fixture( shared_file_size_in_mb )
+   {
+      db->get_benchmark_dumper().set_enabled( true );
+      db->set_sps_remove_threshold( -1 );
+   }
+};
 
 struct json_rpc_database_fixture : public database_fixture
 {

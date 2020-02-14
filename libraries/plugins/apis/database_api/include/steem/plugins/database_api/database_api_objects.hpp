@@ -6,9 +6,11 @@
 #include <steem/chain/history_object.hpp>
 #include <steem/chain/steem_objects.hpp>
 #include <steem/chain/smt_objects.hpp>
+#include <steem/chain/sps_objects.hpp>
 #include <steem/chain/transaction_object.hpp>
 #include <steem/chain/witness_objects.hpp>
 #include <steem/chain/database.hpp>
+#include <steem/chain/smt_objects/account_balance_object.hpp>
 
 namespace steem { namespace plugins { namespace database_api {
 
@@ -164,7 +166,6 @@ struct api_account_object
       id( a.id ),
       name( a.name ),
       memo_key( a.memo_key ),
-      json_metadata( to_string( a.json_metadata ) ),
       proxy( a.proxy ),
       last_account_update( a.last_account_update ),
       created( a.created ),
@@ -176,8 +177,8 @@ struct api_account_object
       lifetime_vote_count( a.lifetime_vote_count ),
       post_count( a.post_count ),
       can_vote( a.can_vote ),
-      voting_power( a.voting_power ),
-      last_vote_time( a.last_vote_time ),
+      voting_manabar( a.voting_manabar ),
+      downvote_manabar( a.downvote_manabar ),
       balance( a.balance ),
       savings_balance( a.savings_balance ),
       sbd_balance( a.sbd_balance ),
@@ -205,7 +206,11 @@ struct api_account_object
       withdraw_routes( a.withdraw_routes ),
       witnesses_voted_for( a.witnesses_voted_for ),
       last_post( a.last_post ),
-      last_root_post( a.last_root_post )
+      last_root_post( a.last_root_post ),
+      last_post_edit( a.last_post_edit ),
+      last_vote_time( a.last_vote_time ),
+      post_bandwidth( a.post_bandwidth ),
+      pending_claimed_accounts( a.pending_claimed_accounts )
    {
       size_t n = a.proxied_vsf_votes.size();
       proxied_vsf_votes.reserve( n );
@@ -217,11 +222,18 @@ struct api_account_object
       active = authority( auth.active );
       posting = authority( auth.posting );
       last_owner_update = auth.last_owner_update;
-#ifdef STEEM_ENABLE_SMT
+#ifndef IS_LOW_MEM
+      const auto* maybe_meta = db.find< account_metadata_object, by_account >( id );
+      if( maybe_meta )
+      {
+         json_metadata = to_string( maybe_meta->json_metadata );
+         posting_json_metadata = to_string( maybe_meta->posting_json_metadata );
+      }
+#endif
+
       const auto& by_control_account_index = db.get_index<smt_token_index>().indices().get<by_control_account>();
       auto smt_obj_itr = by_control_account_index.find( name );
       is_smt = smt_obj_itr != by_control_account_index.end();
-#endif
    }
 
 
@@ -235,6 +247,7 @@ struct api_account_object
    authority         posting;
    public_key_type   memo_key;
    string            json_metadata;
+   string            posting_json_metadata;
    account_name_type proxy;
 
    time_point_sec    last_owner_update;
@@ -250,8 +263,8 @@ struct api_account_object
    uint32_t          post_count = 0;
 
    bool              can_vote = false;
-   uint16_t          voting_power = 0;
-   time_point_sec    last_vote_time;
+   util::manabar     voting_manabar;
+   util::manabar     downvote_manabar;
 
    asset             balance;
    asset             savings_balance;
@@ -287,10 +300,15 @@ struct api_account_object
 
    vector< share_type > proxied_vsf_votes;
 
-   uint16_t          witnesses_voted_for;
+   uint16_t          witnesses_voted_for = 0;
 
    time_point_sec    last_post;
    time_point_sec    last_root_post;
+   time_point_sec    last_post_edit;
+   time_point_sec    last_vote_time;
+   uint32_t          post_bandwidth = 0;
+
+   share_type        pending_claimed_accounts = 0;
 
    bool              is_smt = false;
 };
@@ -395,7 +413,8 @@ struct api_witness_object
       last_work( w.last_work ),
       running_version( w.running_version ),
       hardfork_version_vote( w.hardfork_version_vote ),
-      hardfork_time_vote( w.hardfork_time_vote )
+      hardfork_time_vote( w.hardfork_time_vote ),
+      available_witness_account_subsidies( w.available_witness_account_subsidies )
    {}
 
    api_witness_object() {}
@@ -420,6 +439,7 @@ struct api_witness_object
    version           running_version;
    hardfork_version  hardfork_version_vote;
    time_point_sec    hardfork_time_vote;
+   int64_t           available_witness_account_subsidies = 0;
 };
 
 struct api_witness_schedule_object
@@ -431,7 +451,7 @@ struct api_witness_schedule_object
       current_virtual_time( wso.current_virtual_time ),
       next_shuffle_block_num( wso.next_shuffle_block_num ),
       num_scheduled_witnesses( wso.num_scheduled_witnesses ),
-      top19_weight( wso.top19_weight ),
+      elected_weight( wso.elected_weight ),
       timeshare_weight( wso.timeshare_weight ),
       miner_weight( wso.miner_weight ),
       witness_pay_normalization_factor( wso.witness_pay_normalization_factor ),
@@ -440,7 +460,10 @@ struct api_witness_schedule_object
       max_voted_witnesses( wso.max_voted_witnesses ),
       max_miner_witnesses( wso.max_miner_witnesses ),
       max_runner_witnesses( wso.max_runner_witnesses ),
-      hardfork_required_witnesses( wso.hardfork_required_witnesses )
+      hardfork_required_witnesses( wso.hardfork_required_witnesses ),
+      account_subsidy_rd( wso.account_subsidy_rd ),
+      account_subsidy_witness_rd( wso.account_subsidy_witness_rd ),
+      min_witness_account_subsidy_decay( wso.min_witness_account_subsidy_decay )
    {
       size_t n = wso.current_shuffled_witnesses.size();
       current_shuffled_witnesses.reserve( n );
@@ -456,7 +479,7 @@ struct api_witness_schedule_object
    uint32_t                   next_shuffle_block_num;
    vector<string>             current_shuffled_witnesses;   // fc::array<account_name_type,...> -> vector<string>
    uint8_t                    num_scheduled_witnesses;
-   uint8_t                    top19_weight;
+   uint8_t                    elected_weight;
    uint8_t                    timeshare_weight;
    uint8_t                    miner_weight;
    uint32_t                   witness_pay_normalization_factor;
@@ -467,6 +490,10 @@ struct api_witness_schedule_object
    uint8_t                    max_miner_witnesses;
    uint8_t                    max_runner_witnesses;
    uint8_t                    hardfork_required_witnesses;
+
+   rd_dynamics_params         account_subsidy_rd;
+   rd_dynamics_params         account_subsidy_witness_rd;
+   int64_t                    min_witness_account_subsidy_decay = 0;
 };
 
 struct api_signed_block_object : public signed_block
@@ -512,14 +539,86 @@ struct api_hardfork_property_object
    fc::time_point_sec            next_hardfork_time;
 };
 
+struct api_smt_token_object
+{
+   api_smt_token_object( const smt_token_object& token, const database& db ) : token( token )
+   {
+      const smt_ico_object* ico = db.find< chain::smt_ico_object, chain::by_symbol >( token.liquid_symbol );
+      if ( ico != nullptr )
+         this->ico = *ico;
+   }
 
+   smt_token_object                token;
+   fc::optional< smt_ico_object >  ico;
+};
+
+enum proposal_status
+{
+   all,
+   inactive,
+   active,
+   expired,
+   votable
+};
+
+proposal_status get_proposal_status( const proposal_object& po, const time_point_sec current_time );
+
+typedef uint64_t api_id_type;
+
+struct api_proposal_object
+{
+   api_proposal_object() = default;
+
+   api_proposal_object(const proposal_object& po, const time_point_sec& current_time) :
+      id(po.id),
+      proposal_id(po.proposal_id),
+      creator(po.creator),
+      receiver(po.receiver),
+      start_date(po.start_date),
+      end_date(po.end_date),
+      daily_pay(po.daily_pay),
+      subject(to_string(po.subject)),
+      permlink(to_string(po.permlink)),
+      total_votes(po.total_votes),
+      status(get_proposal_status(po,current_time))
+   {}
+
+   api_id_type       id;
+
+   api_id_type       proposal_id;
+   account_name_type creator;
+   account_name_type receiver;
+   time_point_sec    start_date;
+   time_point_sec    end_date;
+   asset             daily_pay;
+   string            subject;
+   string            permlink;
+   uint64_t          total_votes = 0;
+   proposal_status   status = proposal_status::all;
+};
+
+struct api_proposal_vote_object
+{
+   api_proposal_vote_object() = default;
+
+   api_proposal_vote_object( const proposal_vote_object& pvo, const database& db ) :
+      id( pvo.id ),
+      voter( pvo.voter ),
+      proposal( db.get< proposal_object, by_id >( pvo.proposal_id ), db.head_block_time() )
+   {}
+
+   proposal_vote_id_type   id;
+   account_name_type       voter;
+   api_proposal_object     proposal;
+};
 
 struct order
 {
    price                order_price;
-   double               real_price; // dollars per steem
-   share_type           steem;
-   share_type           sbd;
+   std::string          decimal_price;
+   double               real_price;
+   asset                for_sale;
+   asset                to_receive;
    fc::time_point_sec   created;
 };
 
@@ -527,6 +626,63 @@ struct order_book
 {
    vector< order >      asks;
    vector< order >      bids;
+};
+
+struct api_smt_account_balance_object
+{
+   api_smt_account_balance_object() = default;
+
+   api_smt_account_balance_object( const account_regular_balance_object& b, const database& db ) :
+      id( b.id ),
+      name( b.name ),
+      liquid( b.liquid ),
+      vesting_shares( b.vesting_shares ),
+      delegated_vesting_shares( b.delegated_vesting_shares ),
+      received_vesting_shares( b.received_vesting_shares ),
+      vesting_withdraw_rate( b.vesting_withdraw_rate ),
+      next_vesting_withdrawal( b.next_vesting_withdrawal ),
+      withdrawn( b.withdrawn ),
+      to_withdraw( b.to_withdraw ),
+      voting_manabar( b.voting_manabar ),
+      downvote_manabar( b.downvote_manabar ),
+      last_vote_time( b.last_vote_time )
+   {
+      auto rewards = db.find< account_rewards_balance_object, by_name_liquid_symbol >( boost::make_tuple( name, liquid.symbol ) );
+      if( rewards != nullptr )
+      {
+         pending_liquid = rewards->pending_liquid;
+         pending_vesting_shares = rewards->pending_vesting_shares;
+         pending_vesting_value = rewards->pending_vesting_value;
+      }
+      else
+      {
+         pending_liquid = asset( 0, liquid.symbol );
+         pending_vesting_shares = asset( 0, liquid.symbol.get_paired_symbol() );
+         pending_vesting_value = asset( 0, liquid.symbol );;
+      }
+   }
+
+   api_id_type         id;
+   account_name_type   name;
+   asset               liquid;
+
+   asset               vesting_shares;
+   asset               delegated_vesting_shares;
+   asset               received_vesting_shares;
+
+   asset               vesting_withdraw_rate;
+   time_point_sec      next_vesting_withdrawal = fc::time_point_sec::maximum();
+   share_type          withdrawn               = 0;
+   share_type          to_withdraw             = 0;
+
+   util::manabar       voting_manabar;
+   util::manabar       downvote_manabar;
+
+   fc::time_point_sec  last_vote_time;
+
+   asset               pending_liquid;
+   asset               pending_vesting_shares;
+   asset               pending_vesting_value;
 };
 
 } } } // steem::plugins::database_api
@@ -549,10 +705,10 @@ FC_REFLECT( steem::plugins::database_api::api_comment_vote_object,
           )
 
 FC_REFLECT( steem::plugins::database_api::api_account_object,
-             (id)(name)(owner)(active)(posting)(memo_key)(json_metadata)(proxy)(last_owner_update)(last_account_update)
+             (id)(name)(owner)(active)(posting)(memo_key)(json_metadata)(posting_json_metadata)(proxy)(last_owner_update)(last_account_update)
              (created)(mined)
              (recovery_account)(last_account_recovery)(reset_account)
-             (comment_count)(lifetime_vote_count)(post_count)(can_vote)(voting_power)(last_vote_time)
+             (comment_count)(lifetime_vote_count)(post_count)(can_vote)(voting_manabar)(downvote_manabar)
              (balance)
              (savings_balance)
              (sbd_balance)(sbd_seconds)(sbd_seconds_last_update)(sbd_last_interest_payment)
@@ -562,7 +718,8 @@ FC_REFLECT( steem::plugins::database_api::api_account_object,
              (curation_rewards)
              (posting_rewards)
              (proxied_vsf_votes)(witnesses_voted_for)
-             (last_post)(last_root_post)
+             (last_post)(last_root_post)(last_post_edit)(last_vote_time)
+             (post_bandwidth)(pending_claimed_accounts)
              (is_smt)
           )
 
@@ -607,6 +764,7 @@ FC_REFLECT( steem::plugins::database_api::api_witness_object,
              (last_work)
              (running_version)
              (hardfork_version_vote)(hardfork_time_vote)
+             (available_witness_account_subsidies)
           )
 
 FC_REFLECT( steem::plugins::database_api::api_witness_schedule_object,
@@ -615,7 +773,7 @@ FC_REFLECT( steem::plugins::database_api::api_witness_schedule_object,
              (next_shuffle_block_num)
              (current_shuffled_witnesses)
              (num_scheduled_witnesses)
-             (top19_weight)
+             (elected_weight)
              (timeshare_weight)
              (miner_weight)
              (witness_pay_normalization_factor)
@@ -625,6 +783,9 @@ FC_REFLECT( steem::plugins::database_api::api_witness_schedule_object,
              (max_miner_witnesses)
              (max_runner_witnesses)
              (hardfork_required_witnesses)
+             (account_subsidy_rd)
+             (account_subsidy_witness_rd)
+             (min_witness_account_subsidy_decay)
           )
 
 FC_REFLECT_DERIVED( steem::plugins::database_api::api_signed_block_object, (steem::protocol::signed_block),
@@ -642,6 +803,58 @@ FC_REFLECT( steem::plugins::database_api::api_hardfork_property_object,
             (next_hardfork_time)
           )
 
-FC_REFLECT( steem::plugins::database_api::order, (order_price)(real_price)(steem)(sbd)(created) );
+FC_REFLECT( steem::plugins::database_api::api_smt_token_object,
+   (token)
+   (ico)
+)
+
+FC_REFLECT_ENUM( steem::plugins::database_api::proposal_status,
+                  (all)
+                  (inactive)
+                  (active)
+                  (expired)
+                  (votable)
+               )
+
+FC_REFLECT( steem::plugins::database_api::api_proposal_object,
+            (id)
+            (proposal_id)
+            (creator)
+            (receiver)
+            (start_date)
+            (end_date)
+            (daily_pay)
+            (subject)
+            (permlink)
+            (total_votes)
+            (status)
+          )
+
+FC_REFLECT( steem::plugins::database_api::api_proposal_vote_object,
+            (id)
+            (voter)
+            (proposal)
+          )
+
+FC_REFLECT( steem::plugins::database_api::order, (order_price)(decimal_price)(real_price)(for_sale)(to_receive)(created) );
 
 FC_REFLECT( steem::plugins::database_api::order_book, (asks)(bids) );
+
+FC_REFLECT( steem::plugins::database_api::api_smt_account_balance_object,
+            (id)
+            (name)
+            (liquid)
+            (vesting_shares)
+            (delegated_vesting_shares)
+            (received_vesting_shares)
+            (vesting_withdraw_rate)
+            (next_vesting_withdrawal)
+            (withdrawn)
+            (to_withdraw)
+            (voting_manabar)
+            (downvote_manabar)
+            (last_vote_time)
+            (pending_liquid)
+            (pending_vesting_shares)
+            (pending_vesting_value)
+          )

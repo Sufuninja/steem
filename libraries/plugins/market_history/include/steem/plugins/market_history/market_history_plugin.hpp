@@ -1,9 +1,8 @@
 #pragma once
+#include <steem/chain/steem_fwd.hpp>
 #include <steem/plugins/chain/chain_plugin.hpp>
 
 #include <steem/chain/steem_object_types.hpp>
-
-#include <boost/multi_index/composite_key.hpp>
 
 //
 // Plugins should #define their SPACE_ID's so plugins with
@@ -47,8 +46,8 @@ class market_history_plugin : public plugin< market_history_plugin >
 
       static const std::string& name() { static std::string name = STEEM_MARKET_HISTORY_PLUGIN_NAME; return name; }
 
-      flat_set< uint32_t > get_tracked_buckets() const;
-      uint32_t get_max_history_per_bucket() const;
+      const vector< uint32_t >& get_tracked_buckets() const;
+      uint32_t get_max_history_track_time() const;
 
       virtual void set_program_options(
          options_description& cli,
@@ -100,15 +99,10 @@ struct bucket_object : public object< bucket_object_type, bucket_object >
    bucket_object_details steem;
    bucket_object_details non_steem;
 
-#ifdef STEEM_ENABLE_SMT
    asset_symbol_type symbol = SBD_SYMBOL;
 
    price high()const { return asset( non_steem.high, symbol ) / asset( steem.high, STEEM_SYMBOL ); }
    price low()const { return asset( non_steem.low, symbol ) / asset( steem.low, STEEM_SYMBOL ); }
-#else
-   price high()const { return asset( non_steem.high, SBD_SYMBOL ) / asset( steem.high, STEEM_SYMBOL ); }
-   price low()const { return asset( non_steem.low, SBD_SYMBOL ) / asset( steem.low, STEEM_SYMBOL ); }
-#endif
 };
 
 typedef oid< bucket_object > bucket_id_type;
@@ -122,10 +116,18 @@ struct order_history_object : public object< order_history_object_type, order_hi
       c( *this );
    }
 
+   order_history_object() {}
+
    id_type                          id;
 
    fc::time_point_sec               time;
    protocol::fill_order_operation   op;
+
+   asset_symbol_type                market() const
+   {
+      return op.current_pays.symbol == STEEM_SYMBOL ?
+         op.open_pays.symbol : op.current_pays.symbol;
+   }
 };
 
 typedef oid< order_history_object > order_history_id_type;
@@ -138,10 +140,11 @@ typedef multi_index_container<
       ordered_unique< tag< by_id >, member< bucket_object, bucket_id_type, &bucket_object::id > >,
       ordered_unique< tag< by_bucket >,
          composite_key< bucket_object,
+            member< bucket_object, asset_symbol_type, &bucket_object::symbol >,
             member< bucket_object, uint32_t, &bucket_object::seconds >,
             member< bucket_object, fc::time_point_sec, &bucket_object::open >
          >,
-         composite_key_compare< std::less< uint32_t >, std::less< fc::time_point_sec > >
+         composite_key_compare< std::less< asset_symbol_type >, std::less< uint32_t >, std::less< fc::time_point_sec > >
       >
    >,
    allocator< bucket_object >
@@ -152,7 +155,13 @@ typedef multi_index_container<
    order_history_object,
    indexed_by<
       ordered_unique< tag< by_id >, member< order_history_object, order_history_id_type, &order_history_object::id > >,
-      ordered_non_unique< tag< by_time >, member< order_history_object, time_point_sec, &order_history_object::time > >
+      ordered_unique< tag< by_time >,
+         composite_key< order_history_object,
+            const_mem_fun< order_history_object, asset_symbol_type, &order_history_object::market >,
+            member< order_history_object, time_point_sec, &order_history_object::time >,
+            member< order_history_object, order_history_id_type, &order_history_object::id >
+         >
+      >
    >,
    allocator< order_history_object >
 > order_history_index;
@@ -166,19 +175,13 @@ FC_REFLECT( steem::plugins::market_history::bucket_object_details,
             (close)
             (volume) )
 
-#if defined STEEM_ENABLE_SMT
 FC_REFLECT( steem::plugins::market_history::bucket_object,
                      (id)
                      (open)(seconds)
-                     (steem)(symbol)(non_steem)
+                     (steem)
+                     (symbol)
+                     (non_steem)
          )
-#else
-FC_REFLECT( steem::plugins::market_history::bucket_object,
-                     (id)
-                     (open)(seconds)
-                     (steem)(non_steem)
-         )
-#endif
 
 CHAINBASE_SET_INDEX_TYPE( steem::plugins::market_history::bucket_object, steem::plugins::market_history::bucket_index )
 

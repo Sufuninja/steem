@@ -1,3 +1,6 @@
+
+#include <steem/chain/steem_fwd.hpp>
+
 #include <steem/plugins/block_log_info/block_log_info_plugin.hpp>
 #include <steem/plugins/block_log_info/block_log_info_objects.hpp>
 
@@ -5,7 +8,6 @@
 #include <steem/chain/database.hpp>
 #include <steem/chain/global_property_object.hpp>
 #include <steem/chain/index.hpp>
-#include <steem/chain/operation_notification.hpp>
 
 #include <fstream>
 #include <iostream>
@@ -153,8 +155,8 @@ void block_log_info_plugin::plugin_initialize( const boost::program_options::var
       my->_post_apply_block_conn = db.add_post_apply_block_handler(
          [&]( const block_notification& note ){ my->on_post_apply_block( note ); }, *this );
 
-      add_plugin_index< block_log_hash_state_index >(db);
-      add_plugin_index< block_log_pending_message_index >(db);
+      STEEM_ADD_PLUGIN_INDEX(db, block_log_hash_state_index);
+      STEEM_ADD_PLUGIN_INDEX(db, block_log_pending_message_index);
 
       my->print_interval_seconds = options.at( "block-log-info-print-interval-seconds" ).as< int32_t >();
       my->print_irreversible = options.at( "block-log-info-print-irreversible" ).as< bool >();
